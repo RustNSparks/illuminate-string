@@ -275,6 +275,7 @@ version = "0.2.0"
 dependencies = [
  "base64",
  "chrono",
+ "memchr",
  "pulldown-cmark",
  "rand 0.8.5",
  "regex",

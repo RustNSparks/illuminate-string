@@ -19,3 +19,4 @@ url = "2.5"
 chrono = { version = "0.4", features = ["serde"] }
 pulldown-cmark = "0.9"
 textwrap = "0.16"
+memchr = "2.7.5"

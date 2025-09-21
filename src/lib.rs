@@ -1,5 +1,6 @@
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
+use memchr::memmem::Finder;
 use pulldown_cmark::{Options, Parser, html};
 use rand::{Rng, thread_rng};
 use regex::Regex;
@@ -291,7 +292,8 @@ impl Str {
                 needle.to_string()
             };
 
-            if haystack_check.contains(&needle_check) {
+            let finder = Finder::new(&needle_check);
+            if finder.find(haystack_check.as_bytes()).is_some() {
                 return true;
             }
         }
@@ -1790,6 +1792,37 @@ mod tests {
         assert!(Str::contains("This is my name", &["my"], false));
         assert!(!Str::contains("This is my name", &["hello"], false));
         assert!(Str::contains("This is my name", &["MY"], true));
+    }
+
+    #[test]
+    fn test_contains_large() {
+        let lorem_ipsum = include_str!("../lorem_ipsum.txt");
+        assert!(Str::contains(
+            lorem_ipsum,
+            &[
+                "Cras lobortis lorem ac efficitur egestas. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Mauris lacinia volutpat velit, pharetra tincidunt tortor vestibulum eu. Phasellus consectetur molestie nibh vitae ornare. Vivamus fringilla nunc facilisis velit commodo finibus."
+            ],
+            false
+        ));
+        assert!(Str::contains(
+            lorem_ipsum,
+            &[
+                "Nulla facilisi. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae;"
+            ],
+            false
+        ));
+        assert!(Str::contains(
+            lorem_ipsum,
+            &[
+                "Quisque in lectus dapibus, rhoncus massa non, sodales velit. Quisque laoreet leo sit amet lectus efficitur, ac facilisis sem ultrices. Praesent ullamcorper lectus et ultrices pulvinar. Praesent ac fringilla enim. Sed eu hendrerit lectus. Aenean maximus nulla ut faucibus rhoncus. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Praesent metus mauris, fringilla et vestibulum eget, tempus vitae erat. Fusce pulvinar bibendum urna sit amet tempus. Vivamus luctus facilisis faucibus. Sed pharetra, elit nec porttitor bibendum, nulla nibh dictum lectus, quis elementum purus arcu vel magna. Vestibulum at neque justo. Morbi scelerisque tortor a elementum hendrerit. Cras dapibus sit amet libero consequat tincidunt."
+            ],
+            false
+        ));
+        assert!(Str::contains(lorem_ipsum, &[
+            "Ut tellus risus, elementum sed mauris at, consequat luctus sapien. Suspendisse accumsan, nulla ut tristique ullamcorper, nisi lectus egestas nibh, efficitur imperdiet sem nisl ac nisi. In lacinia in mauris sed hendrerit. Praesent maximus imperdiet sem ut malesuada. Sed quis congue purus, vel condimentum odio. Aliquam erat volutpat. Integer vel nibh non ipsum gravida dignissim. Proin luctus, turpis ac aliquam ultricies, ligula arcu fermentum neque, in facilisis felis lectus sed libero. Mauris lobortis, nulla at convallis efficitur, mi quam finibus metus, eu tempus nisi magna ac ex. Nunc eget sapien aliquam, vestibulum nisl non, dictum tortor.
+
+Vestibulum sollicitudin nisi sed metus vehicula, eu pulvinar enim faucibus. Praesent feugiat vulputate orci non ultrices. Maecenas scelerisque mauris eu purus cursus, ut sollicitudin eros tincidunt. Morbi eget libero tellus. Sed pulvinar in quam sit amet sagittis. Nam malesuada congue odio vel sagittis. Curabitur rhoncus mollis ante a elementum. Aliquam volutpat tempor turpis, at dapibus lectus auctor sit amet. Aliquam venenatis a elit quis euismod. Ut faucibus lacinia ante ac porttitor. Nullam malesuada ex purus, in convallis risus pulvinar id. Etiam ut dolor neque. Pellentesque sed orci ultricies, iaculis velit eu, molestie sapien."
+        ], false))
     }
 
     #[test]
