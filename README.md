@@ -113,7 +113,7 @@ fn main() {
 
 #### Markdown Processing
 ```rust
-use string_rs::{Str, MarkdownOptions};
+use illuminate_string::{Str, MarkdownOptions};
 
 let options = MarkdownOptions::default();
 let html = Str::markdown("# Hello\nThis is **bold**", options);
@@ -161,7 +161,7 @@ let decoded = Str::from_base64(&encoded, false).unwrap();
 
 ### ExcerptOptions
 ```rust
-use string_rs::ExcerptOptions;
+use illuminate_string::ExcerptOptions;
 
 let options = ExcerptOptions {
     radius: 100,
@@ -171,7 +171,7 @@ let options = ExcerptOptions {
 
 ### MarkdownOptions
 ```rust
-use string_rs::MarkdownOptions;
+use illuminate_string::MarkdownOptions;
 
 let options = MarkdownOptions {
     tables: true,
