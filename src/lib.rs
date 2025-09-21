@@ -1,16 +1,21 @@
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
-use pulldown_cmark::{html, Options, Parser};
-use rand::{thread_rng, Rng};
+use pulldown_cmark::{Options, Parser, html};
+use rand::{Rng, thread_rng};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock; // <-- The path changes here
 use std::sync::{Arc, Mutex, OnceLock};
-use textwrap;
+
 use ulid::Ulid;
 use unicode_segmentation::UnicodeSegmentation;
 use unidecode::unidecode;
 use uuid::Uuid;
+
+// Type aliases for complex types
+type UuidSequence = Arc<Mutex<Option<(Vec<Uuid>, usize)>>>;
+type UlidSequence = Arc<Mutex<Option<(Vec<Ulid>, usize)>>>;
+type RandomSequence = Arc<Mutex<Option<(Vec<String>, usize)>>>;
 
 // Global caches for performance
 static SNAKE_CACHE: LazyLock<Arc<Mutex<HashMap<String, String>>>> =
@@ -27,12 +32,9 @@ static RANDOM_STRING_FACTORY: OnceLock<Box<dyn Fn(usize) -> String + Send + Sync
     OnceLock::new();
 
 // Sequence factories
-static UUID_SEQUENCE: LazyLock<Arc<Mutex<Option<(Vec<Uuid>, usize)>>>> =
-    LazyLock::new(|| Arc::new(Mutex::new(None)));
-static ULID_SEQUENCE: LazyLock<Arc<Mutex<Option<(Vec<Ulid>, usize)>>>> =
-    LazyLock::new(|| Arc::new(Mutex::new(None)));
-static RANDOM_SEQUENCE: LazyLock<Arc<Mutex<Option<(Vec<String>, usize)>>>> =
-    LazyLock::new(|| Arc::new(Mutex::new(None)));
+static UUID_SEQUENCE: LazyLock<UuidSequence> = LazyLock::new(|| Arc::new(Mutex::new(None)));
+static ULID_SEQUENCE: LazyLock<UlidSequence> = LazyLock::new(|| Arc::new(Mutex::new(None)));
+static RANDOM_SEQUENCE: LazyLock<RandomSequence> = LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 // Invisible characters constant
 const INVISIBLE_CHARACTERS: &str = "\u{0009}\u{0020}\u{00A0}\u{00AD}\u{034F}\u{061C}\u{115F}\u{1160}\u{17B4}\u{17B5}\u{180E}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{200B}\u{200C}\u{200D}\u{200E}\u{200F}\u{202F}\u{205F}\u{2060}\u{2061}\u{2062}\u{2063}\u{2064}\u{2065}\u{206A}\u{206B}\u{206C}\u{206D}\u{206E}\u{206F}\u{3000}\u{2800}\u{3164}\u{FEFF}\u{FFA0}\u{1D159}\u{1D173}\u{1D174}\u{1D175}\u{1D176}\u{1D177}\u{1D178}\u{1D179}\u{1D17A}\u{E0020}";
@@ -253,8 +255,8 @@ impl Str {
     /// Remove the given string(s) if it exists at the start of the haystack
     pub fn chop_start(subject: &str, needles: &[&str]) -> String {
         for needle in needles {
-            if subject.starts_with(needle) {
-                return subject[needle.len()..].to_string();
+            if let Some(stripped) = subject.strip_prefix(needle) {
+                return stripped.to_string();
             }
         }
         subject.to_string()
@@ -263,8 +265,8 @@ impl Str {
     /// Remove the given string(s) if it exists at the end of the haystack
     pub fn chop_end(subject: &str, needles: &[&str]) -> String {
         for needle in needles {
-            if subject.ends_with(needle) {
-                return subject[..subject.len() - needle.len()].to_string();
+            if let Some(stripped) = subject.strip_suffix(needle) {
+                return stripped.to_string();
             }
         }
         subject.to_string()
@@ -429,10 +431,10 @@ impl Str {
             let flags = if ignore_case { "(?i)" } else { "" };
             let full_pattern = format!("{}^{}$", flags, pattern_regex);
 
-            if let Ok(re) = Regex::new(&full_pattern) {
-                if re.is_match(value) {
-                    return true;
-                }
+            if let Ok(re) = Regex::new(&full_pattern)
+                && re.is_match(value)
+            {
+                return true;
             }
         }
         false
@@ -619,10 +621,10 @@ impl Str {
     /// Determine if a given string matches a given pattern
     pub fn is_match(patterns: &[&str], value: &str) -> bool {
         for pattern in patterns {
-            if let Ok(re) = Regex::new(pattern) {
-                if re.is_match(value) {
-                    return true;
-                }
+            if let Ok(re) = Regex::new(pattern)
+                && re.is_match(value)
+            {
+                return true;
             }
         }
         false
@@ -655,8 +657,8 @@ impl Str {
         let left_padding = total_padding / 2;
         let right_padding = total_padding - left_padding;
 
-        let left_pad = pad.repeat((left_padding + pad.len() - 1) / pad.len());
-        let right_pad = pad.repeat((right_padding + pad.len() - 1) / pad.len());
+        let left_pad = pad.repeat(left_padding.div_ceil(pad.len()));
+        let right_pad = pad.repeat(right_padding.div_ceil(pad.len()));
 
         format!(
             "{}{}{}",
@@ -674,7 +676,7 @@ impl Str {
         }
 
         let padding_needed = length - current_len;
-        let pad_string = pad.repeat((padding_needed + pad.len() - 1) / pad.len());
+        let pad_string = pad.repeat(padding_needed.div_ceil(pad.len()));
 
         format!(
             "{}{}",
@@ -691,7 +693,7 @@ impl Str {
         }
 
         let padding_needed = length - current_len;
-        let pad_string = pad.repeat((padding_needed + pad.len() - 1) / pad.len());
+        let pad_string = pad.repeat(padding_needed.div_ceil(pad.len()));
 
         format!(
             "{}{}",
@@ -828,12 +830,12 @@ impl Str {
         // Check for sequence first
         {
             let mut sequence = RANDOM_SEQUENCE.lock().unwrap();
-            if let Some((seq, index)) = sequence.as_mut() {
-                if *index < seq.len() {
-                    let result = seq[*index].clone();
-                    *index += 1;
-                    return result;
-                }
+            if let Some((seq, index)) = sequence.as_mut()
+                && *index < seq.len()
+            {
+                let result = seq[*index].clone();
+                *index += 1;
+                return result;
             }
         }
 
@@ -1032,7 +1034,7 @@ impl Str {
     pub fn title(value: &str) -> String {
         value
             .split_whitespace()
-            .map(|word| Self::ucfirst(word))
+            .map(Self::ucfirst)
             .collect::<Vec<_>>()
             .join(" ")
     }
@@ -1472,11 +1474,22 @@ impl Str {
 
     /// Split a string into pieces by uppercase characters
     pub fn uc_split(string: &str) -> Vec<String> {
-        let re = Regex::new(r"(?=\p{Lu})").unwrap();
-        re.split(string)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect()
+        let mut result = Vec::new();
+        let mut current = String::new();
+
+        for ch in string.chars() {
+            if ch.is_uppercase() && !current.is_empty() {
+                result.push(current);
+                current = String::new();
+            }
+            current.push(ch);
+        }
+
+        if !current.is_empty() {
+            result.push(current);
+        }
+
+        result
     }
 
     /// Get the number of words a string contains
@@ -1512,12 +1525,12 @@ impl Str {
         // Check for sequence first
         {
             let mut sequence = UUID_SEQUENCE.lock().unwrap();
-            if let Some((seq, index)) = sequence.as_mut() {
-                if *index < seq.len() {
-                    let result = seq[*index];
-                    *index += 1;
-                    return result;
-                }
+            if let Some((seq, index)) = sequence.as_mut()
+                && *index < seq.len()
+            {
+                let result = seq[*index];
+                *index += 1;
+                return result;
             }
         }
 
@@ -1591,12 +1604,12 @@ impl Str {
         // Check for sequence first
         {
             let mut sequence = ULID_SEQUENCE.lock().unwrap();
-            if let Some((seq, index)) = sequence.as_mut() {
-                if *index < seq.len() {
-                    let result = seq[*index];
-                    *index += 1;
-                    return result;
-                }
+            if let Some((seq, index)) = sequence.as_mut()
+                && *index < seq.len()
+            {
+                let result = seq[*index];
+                *index += 1;
+                return result;
             }
         }
 
