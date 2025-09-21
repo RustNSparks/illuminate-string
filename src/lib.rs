@@ -5,7 +5,7 @@ use pulldown_cmark::{Options, Parser, html};
 use rand::{Rng, thread_rng};
 use regex::Regex;
 use std::collections::HashMap;
-use std::sync::LazyLock; // <-- The path changes here
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use ulid::Ulid;
