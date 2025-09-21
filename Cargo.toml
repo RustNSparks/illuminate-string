@@ -1,0 +1,19 @@
+[package]
+name = "illuminate-string"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex = "1.10"
+unicode-segmentation = "1.10"
+unicode-normalization = "0.1"
+unidecode = "0.3"
+base64 = "0.21"
+uuid = { version = "1.0", features = ["v4"] }
+ulid = "1.1"
+rand = "0.8"
+serde_json = "1.0"
+url = "2.5"
+chrono = { version = "0.4", features = ["serde"] }
+pulldown-cmark = "0.9"
+textwrap = "0.16"
