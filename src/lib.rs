@@ -276,20 +276,20 @@ impl Str {
     /// Determine if a given string contains a given substring
     pub fn contains(haystack: &str, needles: &[&str], ignore_case: bool) -> bool {
         let haystack_check = if ignore_case {
-            haystack.to_lowercase()
+            &haystack.to_lowercase()
         } else {
-            haystack.to_string()
+            haystack
         };
 
-        for needle in needles {
+        for needle in needles.iter() {
             if needle.is_empty() {
                 continue;
             }
 
             let needle_check = if ignore_case {
-                needle.to_lowercase()
+                &needle.to_lowercase()
             } else {
-                needle.to_string()
+                *needle
             };
 
             let finder = Finder::new(&needle_check);
