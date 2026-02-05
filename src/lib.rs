@@ -1671,6 +1671,106 @@ impl Str {
         camel_cache.clear();
         studly_cache.clear();
     }
+
+    /// Split a string by the given delimiter.
+    ///
+    /// Behaves like PHP's `explode`:
+    /// - Empty parts are preserved
+    /// - If delimiter is empty, splits into Unicode scalar values
+    ///
+    /// # Example
+    /// ```rust
+    /// use illuminate_string::Str;
+    /// let v = Str::explode("a,,b", ",");
+    /// assert_eq!(v, vec!["a", "", "b"]);
+    /// ```
+    pub fn explode(s: &str, delimiter: &str) -> Vec<String> {
+        if delimiter.is_empty() {
+            let mut out = Vec::with_capacity(s.chars().count());
+            for c in s.chars() {
+                out.push(c.to_string());
+            }
+            return out;
+        }
+
+        // split preserves empty segments => same behavior
+        s.split(delimiter).map(String::from).collect()
+    }
+
+    /// Join string parts using the given delimiter.
+    ///
+    /// Accepts any iterator of string-like values.
+    ///
+    /// # Example
+    /// ```rust
+    /// use illuminate_string::Str;
+    /// let s = Str::implode("-", ["a", "b", "c"]);
+    /// assert_eq!(s, "a-b-c");
+    /// ```
+    pub fn implode<I, S>(delimiter: &str, parts: I) -> String
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut iter = parts.into_iter();
+
+        let first = match iter.next() {
+            Some(v) => v,
+            None => return String::new(),
+        };
+
+        let first_ref = first.as_ref();
+        let mut out = String::with_capacity(first_ref.len());
+        out.push_str(first_ref);
+
+        for part in iter {
+            out.push_str(delimiter);
+            out.push_str(part.as_ref());
+        }
+
+        out
+    }
+
+    /// Limit a string by number of words.
+    ///
+    /// Words are detected using Unicode whitespace.
+    /// If the string exceeds the limit, `end` is appended.
+    ///
+    /// # Example
+    /// ```rust
+    /// use illuminate_string::Str;
+    /// let s = Str::limit_words("hello world from rust", 2, "...");
+    /// assert_eq!(s, "hello world...");
+    /// ```
+    pub fn limit_words(s: &str, count: usize, end: &str) -> String {
+        if count == 0 {
+            return end.to_owned();
+        }
+
+        let mut iter = s.split_whitespace();
+        let mut out = String::new();
+
+        for i in 0..count {
+            match iter.next() {
+                Some(word) => {
+                    if i > 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(word);
+                }
+                None => {
+                    // identical behavior: return original string
+                    return s.to_owned();
+                }
+            }
+        }
+
+        if iter.next().is_some() {
+            out.push_str(end);
+        }
+
+        out
+    }
 }
 
 // Enums and structs for various options
@@ -2083,4 +2183,46 @@ Vestibulum sollicitudin nisi sed metus vehicula, eu pulvinar enim faucibus. Prae
             "Perfectly balanced, as>>>"
         );
     }
+
+    #[test]
+    fn test_explode_basic() {
+        let parts = Str::explode("a,b,,c", ",");
+        assert_eq!(parts, vec!["a", "b", "", "c"]);
+    }
+
+    #[test]
+    fn test_explode_empty_delim() {
+        let parts = Str::explode("abč", "");
+        // splits by chars (UTF-8 codepoints), not grapheme clusters
+        assert_eq!(parts, vec!["a", "b", "č"]);
+    }
+
+    #[test]
+    fn test_implode_basic() {
+        let vec = vec!["a", "b", "c"];
+        let s = Str::implode("-", vec);
+        assert_eq!(s, "a-b-c");
+    }
+
+    #[test]
+    fn test_limit_words_trim() {
+        let s = "This   is  a   test string";
+        let out = Str::limit_words(s, 3, "...");
+        assert_eq!(out, "This is a...");
+    }
+
+    #[test]
+    fn test_limit_words_no_trim() {
+        let s = "Short text";
+        let out = Str::limit_words(s, 5, "...");
+        assert_eq!(out, s);
+    }
+
+    #[test]
+    fn test_limit_zero() {
+        let s = "Anything";
+        let out = Str::limit_words(s, 0, "...");
+        assert_eq!(out, "...");
+    }
+
 }
