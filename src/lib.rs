@@ -1686,11 +1686,7 @@ impl Str {
     /// ```
     pub fn explode(s: &str, delimiter: &str) -> Vec<String> {
         if delimiter.is_empty() {
-            let mut out = Vec::with_capacity(s.chars().count());
-            for c in s.chars() {
-                out.push(c.to_string());
-            }
-            return out;
+            return s.chars().map(|c| c.to_string()).collect();
         }
 
         // split preserves empty segments => same behavior
@@ -1720,7 +1716,9 @@ impl Str {
         };
 
         let first_ref = first.as_ref();
-        let mut out = String::with_capacity(first_ref.len());
+        let remaining_lower = iter.size_hint().0;
+        let capacity = first_ref.len().saturating_add(remaining_lower.saturating_mul(delimiter.len()));
+        let mut out = String::with_capacity(capacity);
         out.push_str(first_ref);
 
         for part in iter {
@@ -1759,8 +1757,8 @@ impl Str {
                     out.push_str(word);
                 }
                 None => {
-                    // identical behavior: return original string
-                    return s.to_owned();
+                    // Fewer words than the limit, so we are done.
+                    break;
                 }
             }
         }
