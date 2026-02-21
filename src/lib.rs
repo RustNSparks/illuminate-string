@@ -2,7 +2,7 @@ use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use memchr::memmem::Finder;
 use pulldown_cmark::{Options, Parser, html};
-use rand::{Rng, thread_rng};
+use rand::{RngExt};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -43,73 +43,108 @@ const INVISIBLE_CHARACTERS: &str = "\u{0009}\u{0020}\u{00A0}\u{00AD}\u{034F}\u{0
 // Pluralization rules (simplified English rules)
 static PLURAL_RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
-        (Regex::new(r"(?i)^(child)$").unwrap(), "${1}ren"),
-        (Regex::new(r"(?i)(quiz)$").unwrap(), "${1}zes"),
+        // Most specific / irregular first
+        (Regex::new(r"(?i)^(child)$").unwrap(), "children"),
+        (Regex::new(r"(?i)^(man)$").unwrap(), "men"),
+        (Regex::new(r"(?i)^(woman)$").unwrap(), "women"),
+        (Regex::new(r"(?i)^(person)$").unwrap(), "people"),
+        (Regex::new(r"(?i)^(foot)$").unwrap(), "feet"),
+        (Regex::new(r"(?i)^(tooth)$").unwrap(), "teeth"),
+        (Regex::new(r"(?i)^(medium)$").unwrap(), "media"),
+        (Regex::new(r"(?i)^(niveau)$").unwrap(), "niveaux"),
+        (Regex::new(r"(?i)^(hippopotamus)$").unwrap(), "hippopotami"),
+        (Regex::new(r"(?i)^(die)$").unwrap(), "dice"),
+        (Regex::new(r"(?i)^(axis)$").unwrap(), "axes"),
+        (Regex::new(r"(?i)^(appendix)$").unwrap(), "appendices"),
+        (Regex::new(r"(?i)^(phenomenon)$").unwrap(), "phenomena"),
+        // ox → oxen
         (Regex::new(r"(?i)^(ox)$").unwrap(), "${1}en"),
-        (Regex::new(r"(?i)([m|l])ouse$").unwrap(), "${1}ice"),
-        (
-            Regex::new(r"(?i)(matr|vert|ind)ix|ex$").unwrap(),
-            "${1}ices",
-        ),
+        // virus, stimulus, ...
+        (Regex::new(r"(?i)(alumn|bacill|cact|foc|fung|nucle|radi|stimul|syllab|termin|vir)us$").unwrap(), "${1}i"),
+        (Regex::new(r"(?i)(octop|vir)us$").unwrap(), "${1}i"), // octopus, virus (also covered above)
+        // matrix, index, vertex → -ices
+        (Regex::new(r"(?i)(matr|vert|ind)(ix|ex)$").unwrap(), "${1}ices"),
+        // analysis, basis, crisis → -ses
+        (Regex::new(r"(?i)(analys|ax|cris|test|thes)is$").unwrap(), "${1}es"),
+        (Regex::new(r"(?i)^(analy)sis$").unwrap(), "${1}ses"),
+        // criteria, phenomena
+        (Regex::new(r"(?i)(criteri|phenomen)on$").unwrap(), "${1}a"),
+        (Regex::new(r"(?i)(curricul|memorand)um$").unwrap(), "${1}a"),
+        // tomato, potato, hero, ...
+        (Regex::new(r"(?i)(buffal|her|potat|tomat|volcan|ech|torped|vet)o$").unwrap(), "${1}oes"),
+        // quiz → quizzes
+        (Regex::new(r"(?i)(quiz)$").unwrap(), "${1}zes"),
+        // leaf, loaf, thief → -ves
+        (Regex::new(r"(?i)(?:([^f])fe|([lr])f)$").unwrap(), "${1}${2}ves"),
+        (Regex::new(r"(?i)(shea|loa|lea|thie)f$").unwrap(), "${1}ves"),
+        // knife → knives (but safe → safes)
+        (Regex::new(r"(?i)([^s])fe$").unwrap(), "${1}ves"),
+        // mouse → mice, louse → lice
+        (Regex::new(r"(?i)([ml])ouse$").unwrap(), "${1}ice"),
+        // Ends in x, ch, ss, sh → +es
         (Regex::new(r"(?i)(x|ch|ss|sh)$").unwrap(), "${1}es"),
+        // Words ending in consonant + y → ies
         (Regex::new(r"(?i)([^aeiouy]|qu)y$").unwrap(), "${1}ies"),
-        (Regex::new(r"(?i)(hive)$").unwrap(), "${1}s"),
-        (
-            Regex::new(r"(?i)(?:([^f])fe|([lr])f)$").unwrap(),
-            "${1}${2}ves",
-        ),
-        (Regex::new(r"(?i)(shea|lea|loa|thie)f$").unwrap(), "${1}ves"),
-        (Regex::new(r"(?i)sis$").unwrap(), "ses"),
-        (Regex::new(r"(?i)([ti])um$").unwrap(), "${1}a"),
-        (
-            Regex::new(r"(?i)(tomat|potat|ech|her|vet)o$").unwrap(),
-            "${1}oes",
-        ),
-        (Regex::new(r"(?i)(bu)s$").unwrap(), "${1}ses"),
+        // status → statuses
+        (Regex::new(r"(?i)(status)$").unwrap(), "${1}es"),
         (Regex::new(r"(?i)(alias)$").unwrap(), "${1}es"),
-        (Regex::new(r"(?i)(octop)us$").unwrap(), "${1}i"),
-        (Regex::new(r"(?i)(ax|test)is$").unwrap(), "${1}es"),
-        (Regex::new(r"(?i)(us)$").unwrap(), "${1}es"),
-        (Regex::new(r"(?i)s$").unwrap(), "s"),
-        (Regex::new(r"(?i)$").unwrap(), "s"),
+        // bus → buses
+        (Regex::new(r"(?i)(bu)s$").unwrap(), "${1}ses"),
+        // Most generic plural rules (last)
+        (Regex::new(r"(?i)s$").unwrap(), "s"),     // glasses, buses (already handled), etc.
+        (Regex::new(r"(?i)$").unwrap(), "s"),      // default add -s
     ]
 });
 
 static SINGULAR_RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
-        (Regex::new(r"(?i)^(child)ren$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(quiz)zes$").unwrap(), "${1}"),
+        // Most specific first — reverse order philosophy
+        (Regex::new(r"(?i)children$").unwrap(), "child"),
+        (Regex::new(r"(?i)men$").unwrap(), "man"),
+        (Regex::new(r"(?i)people$").unwrap(), "person"),
+        (Regex::new(r"(?i)feet$").unwrap(), "foot"),
+        (Regex::new(r"(?i)teeth$").unwrap(), "tooth"),
+        (Regex::new(r"(?i)geese$").unwrap(), "goose"),
+        (Regex::new(r"(?i)oxen$").unwrap(), "ox"),
+        (Regex::new(r"(?i)^(media)$").unwrap(), "medium"),
+        (Regex::new(r"(?i)^(niveaux)$").unwrap(), "niveau"),
+        (Regex::new(r"(?i)^(hippopotami)$").unwrap(), "hippopotamus"),
+        (Regex::new(r"(?i)^(dice)$").unwrap(), "die"),
+        (Regex::new(r"(?i)^(axes)$").unwrap(), "axis"),
+        (Regex::new(r"(?i)^(appendices)$").unwrap(), "appendix"),
+        (Regex::new(r"(?i)^(phenomena)$").unwrap(), "phenomenon"),
+        // ox → oxen
+        // -i → -us
+        (Regex::new(r"(?i)(alumn|bacill|cact|foc|fung|nucle|radi|stimul|syllab|termin|vir)i$").unwrap(), "${1}us"),
+        (Regex::new(r"(?i)(octop|vir)i$").unwrap(), "${1}us"),
+        // -ices → -ix / -ex
         (Regex::new(r"(?i)(matr)ices$").unwrap(), "${1}ix"),
         (Regex::new(r"(?i)(vert|ind)ices$").unwrap(), "${1}ex"),
-        (Regex::new(r"(?i)^(ox)en").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(alias)es$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(octop|vir)i$").unwrap(), "${1}us"),
-        (Regex::new(r"(?i)(cris|ax|test)es$").unwrap(), "${1}is"),
-        (Regex::new(r"(?i)(shoe)s$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(o)es$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(bus)es$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)([m|l])ice$").unwrap(), "${1}ouse"),
-        (Regex::new(r"(?i)(x|ch|ss|sh)es$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(m)ovies$").unwrap(), "${1}ovie"),
-        (Regex::new(r"(?i)(s)eries$").unwrap(), "${1}eries"),
-        (Regex::new(r"(?i)([^aeiouy]|qu)ies$").unwrap(), "${1}y"),
-        (Regex::new(r"(?i)([lr])ves$").unwrap(), "${1}f"),
-        (Regex::new(r"(?i)(tive)s$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(hive)s$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(li|wi|kni)ves$").unwrap(), "${1}fe"),
-        (Regex::new(r"(?i)(shea|loa|lea|thie)ves$").unwrap(), "${1}f"),
-        (Regex::new(r"(?i)(^analy)ses$").unwrap(), "${1}sis"),
-        (
-            Regex::new(r"(?i)((a)naly|(b)a|(d)iagno|(p)arenthe|(p)rogno|(s)ynop|(t)he)ses$")
-                .unwrap(),
-            "${1}${2}sis",
-        ),
+        // -ses → -sis
+        (Regex::new(r"(?i)(analy|ba|diagno|parenthe|progno|synop|the)ses$").unwrap(), "${1}sis"),
+        (Regex::new(r"(?i)(cris|test|ax|thes)es$").unwrap(), "${1}is"),
+        // -a → -um / -on
+        (Regex::new(r"(?i)(criteri|phenomen)a$").unwrap(), "${1}on"),
         (Regex::new(r"(?i)([ti])a$").unwrap(), "${1}um"),
-        (Regex::new(r"(?i)(n)ews$").unwrap(), "${1}ews"),
-        (Regex::new(r"(?i)(h|bl)ouses$").unwrap(), "${1}ouse"),
-        (Regex::new(r"(?i)(corpse)s$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)(us)es$").unwrap(), "${1}"),
-        (Regex::new(r"(?i)s$").unwrap(), ""),
+        // -oes → -o
+        (Regex::new(r"(?i)(buffal|her|potat|tomat|volcan|ech|torped|vet)oes$").unwrap(), "${1}o"),
+        // quizzes → quiz
+        (Regex::new(r"(?i)(quiz)zes$").unwrap(), "${1}"),
+        // -ves → -f / -fe
+        (Regex::new(r"(?i)([^f])ves$").unwrap(), "${1}fe"),
+        (Regex::new(r"(?i)([lr])ves$").unwrap(), "${1}f"),
+        (Regex::new(r"(?i)(shea|loa|lea|thie)ves$").unwrap(), "${1}f"),
+        // mice, lice
+        (Regex::new(r"(?i)([ml])ice$").unwrap(), "${1}ouse"),
+        // -xes, -ches, -shes, -sses
+        (Regex::new(r"(?i)(x|ch|ss|sh)es$").unwrap(), "${1}"),
+        // consonant + ies → y
+        (Regex::new(r"(?i)([^aeiouy]|qu)ies$").unwrap(), "${1}y"),
+        // statuses, aliases
+        (Regex::new(r"(?i)(status|alias)es$").unwrap(), "${1}"),
+        (Regex::new(r"(?i)(bu)ses$").unwrap(), "${1}s"),
+        // Most generic
+        (Regex::new(r"(?i)(.*)s$").unwrap(), "${1}"), // remove final s (fallback)
     ]
 });
 
@@ -805,9 +840,9 @@ impl Str {
             return String::new();
         }
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         (0..length)
-            .map(|_| chars[rng.gen_range(0..chars.len())])
+            .map(|_| chars[rng.random_range(0..chars.len())])
             .collect()
     }
 
@@ -846,11 +881,11 @@ impl Str {
         }
 
         let charset: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         (0..length)
             .map(|_| {
-                let idx = rng.gen_range(0..charset.len());
+                let idx = rng.random_range(0..charset.len());
                 charset[idx] as char
             })
             .collect()
@@ -2044,6 +2079,14 @@ Vestibulum sollicitudin nisi sed metus vehicula, eu pulvinar enim faucibus. Prae
         assert_eq!(Str::plural("car", 1, false), "car");
         assert_eq!(Str::plural("car", 2, false), "cars");
         assert_eq!(Str::plural("child", 2, false), "children");
+        assert_eq!(Str::plural("man", 2, false), "men");
+        assert_eq!(Str::plural("woman", 2, false), "women");
+        assert_eq!(Str::plural("person", 2, false), "people");
+        assert_eq!(Str::plural("thief", 2, false), "thieves");
+        assert_eq!(Str::plural("foot", 2, false), "feet");
+        assert_eq!(Str::plural("foot", 2, false), "feet");
+        assert_eq!(Str::plural("medium", 2, false), "media");
+        assert_eq!(Str::plural("hoax", 2, false), "hoaxes");
     }
 
     #[test]
